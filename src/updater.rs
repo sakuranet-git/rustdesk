@@ -30,11 +30,20 @@ pub fn update_controlling_session_count(count: usize) {
 
 #[allow(dead_code)]
 pub fn start_auto_update() {
+    // SAKURA-Remote: RustDesk公式の自動アップデート機構を完全に無効化
+    // (TX_MSG.lock() を呼ばないことで lazy_static の thread 起動自体を回避)
+    if crate::common::is_custom_client() {
+        return;
+    }
     let _sender = TX_MSG.lock().unwrap();
 }
 
 #[allow(dead_code)]
 pub fn manually_check_update() -> ResultType<()> {
+    // SAKURA-Remote: 手動更新チェックも無効化
+    if crate::common::is_custom_client() {
+        return Ok(());
+    }
     let sender = TX_MSG.lock().unwrap();
     sender.send(UpdateMsg::CheckUpdate)?;
     Ok(())
@@ -118,6 +127,10 @@ fn start_auto_update_check_(rx_msg: Receiver<UpdateMsg>) {
 }
 
 fn check_update(manually: bool) -> ResultType<()> {
+    // SAKURA-Remote: 公式 update check 経路を完全に塞ぐ (depth defense)
+    if crate::common::is_custom_client() {
+        return Ok(());
+    }
     #[cfg(target_os = "windows")]
     let update_msi = crate::platform::is_msi_installed()? && !crate::is_custom_client();
     if !(manually || config::Config::get_bool_option(config::keys::OPTION_ALLOW_AUTO_UPDATE)) {
