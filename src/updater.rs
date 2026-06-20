@@ -217,6 +217,10 @@ fn check_update(manually: bool) -> ResultType<()> {
 
 #[cfg(target_os = "windows")]
 fn update_new_version(update_msi: bool, version: &str, file_path: &PathBuf) {
+    // SAKURA-Remote: depth defense - check_update で早期returnしているが念のため
+    if crate::common::is_custom_client() {
+        return;
+    }
     log::debug!(
         "New version is downloaded, update begin, update msi: {update_msi}, version: {version}, file: {:?}",
         file_path.to_str()
