@@ -51,6 +51,12 @@ pub fn manually_check_update() -> ResultType<()> {
 
 #[allow(dead_code)]
 pub fn stop_auto_update() {
+    // SAKURA-Remote: stop経由でも TX_MSG.lock() を呼ばないようガード
+    // (start_auto_update() で起動してないので stop する thread もないが、
+    //  将来の上流変更で意図せず呼ばれて lazy_static thread が起動するのを防ぐ)
+    if crate::common::is_custom_client() {
+        return;
+    }
     let sender = TX_MSG.lock().unwrap();
     sender.send(UpdateMsg::Exit).unwrap_or_default();
 }
