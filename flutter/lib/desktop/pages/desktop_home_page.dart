@@ -20,6 +20,7 @@ import 'package:flutter_hbb/plugin/ui_manager.dart';
 import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:flutter_hbb/utils/platform_channel.dart';
 import 'package:get/get.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
@@ -53,6 +54,9 @@ class _DesktopHomePageState extends State<DesktopHomePage>
 
   final RxBool _editHover = false.obs;
   final RxBool _block = false.obs;
+
+  // SAKURA-Remote: 「アップデートを確認」ボタンの実行中フラグ
+  final RxBool _liveUpdateChecking = false.obs;
 
   final GlobalKey _childKey = GlobalKey();
 
@@ -90,6 +94,11 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         alignment: Alignment.center,
         child: loadLogo(),
       ),
+      if (isWindows && bind.isCustomClient())
+        Align(
+          alignment: Alignment.center,
+          child: buildLiveUpdateButton(context),
+        ),
       buildTip(context),
       if (!isOutgoingOnly) buildIDBoard(context),
       if (!isOutgoingOnly) buildPasswordBoard(context),
@@ -185,6 +194,127 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       color: Theme.of(context).scaffoldBackgroundColor,
       child: ConnectionPage(),
     );
+  }
+
+  // ===== SAKURA-Remote: アップデートを確認 =====
+  // version.json (https://sakuranet-co.jp/SAKURA-Remote-version.json) を取得し、
+  // レジストリの ProductVersion と比較。新しければ確認のうえ updater.ps1 -Manual を昇格起動する。
+  static const String _kVersionJsonUrl =
+      'https://sakuranet-co.jp/SAKURA-Remote-version.json';
+  static const String _kUpdaterPath =
+      r'C:\Program Files\SAKURA-Remote\updater.ps1';
+
+  Widget buildLiveUpdateButton(BuildContext context) {
+    return Obx(() {
+      final checking = _liveUpdateChecking.value;
+      return TextButton.icon(
+        onPressed: checking ? null : () => _checkLiveUpdate(context),
+        icon: checking
+            ? const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.system_update_alt, size: 16),
+        label: Text(
+          translate(checking ? 'live_update_checking' : 'live_update_check'),
+          style: const TextStyle(fontSize: 12),
+        ),
+      );
+    }).marginOnly(top: 2, bottom: 2);
+  }
+
+  Future<void> _checkLiveUpdate(BuildContext context) async {
+    _liveUpdateChecking.value = true;
+    try {
+      final resp = await http
+          .get(Uri.parse(_kVersionJsonUrl))
+          .timeout(const Duration(seconds: 15));
+      if (resp.statusCode != 200) {
+        throw Exception('HTTP ${resp.statusCode}');
+      }
+      final manifest = jsonDecode(resp.body) as Map<String, dynamic>;
+      final latest = (manifest['product_version'] ?? '').toString();
+      if (latest.isEmpty) {
+        throw Exception('product_version missing');
+      }
+      final current = await _getInstalledProductVersion();
+      if (_compareVersion(latest, current) > 0) {
+        final ok = await _confirmUpdateDialog(current, latest);
+        if (ok == true) {
+          await _launchManualUpdater();
+          showToast(translate('live_update_started'));
+        }
+      } else {
+        showToast(translate('live_update_latest'));
+      }
+    } catch (e) {
+      debugPrint('SAKURA live update check failed: $e');
+      showToast(translate('live_update_failed'));
+    } finally {
+      _liveUpdateChecking.value = false;
+    }
+  }
+
+  Future<String> _getInstalledProductVersion() async {
+    try {
+      final result = await Process.run('reg', [
+        'query',
+        r'HKLM\SOFTWARE\SAKURA-Remote',
+        '/v',
+        'ProductVersion',
+      ]);
+      final out = result.stdout.toString();
+      final m =
+          RegExp(r'ProductVersion\s+REG_SZ\s+([0-9.]+)').firstMatch(out);
+      if (m != null) return m.group(1)!;
+    } catch (e) {
+      debugPrint('read ProductVersion failed: $e');
+    }
+    return '0.0.0';
+  }
+
+  int _compareVersion(String a, String b) {
+    final pa = a.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+    final pb = b.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+    final len = pa.length > pb.length ? pa.length : pb.length;
+    for (var i = 0; i < len; i++) {
+      final va = i < pa.length ? pa[i] : 0;
+      final vb = i < pb.length ? pb[i] : 0;
+      if (va != vb) return va > vb ? 1 : -1;
+    }
+    return 0;
+  }
+
+  Future<bool?> _confirmUpdateDialog(String current, String latest) {
+    return gFFI.dialogManager.show<bool>((setState, close, context) {
+      return CustomAlertDialog(
+        title: Text(translate('live_update_available_title')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(translate('live_update_available_msg')),
+            const SizedBox(height: 8),
+            Text('$current  →  $latest'),
+          ],
+        ),
+        actions: [
+          dialogButton(translate('Cancel'),
+              onPressed: () => close(false), isOutline: true),
+          dialogButton(translate('live_update_now'),
+              onPressed: () => close(true)),
+        ],
+        onCancel: () => close(false),
+      );
+    });
+  }
+
+  Future<void> _launchManualUpdater() async {
+    // updater.ps1 は Program Files への書込みが必要なため管理者権限で昇格起動する。
+    final psCommand = "Start-Process powershell -Verb RunAs -ArgumentList "
+        "'-NoProfile','-ExecutionPolicy','Bypass','-File','$_kUpdaterPath','-Manual'";
+    await Process.start('powershell', ['-NoProfile', '-Command', psCommand]);
   }
 
   buildIDBoard(BuildContext context) {
