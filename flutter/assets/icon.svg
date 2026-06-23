@@ -1,1 +1,28 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" viewBox="66.993 897.484 26 26"><linearGradient id="a" x1=".148" x2=".845" y1=".851" y2=".154" gradientTransform="matrix(26.301 0 0 26.331 90.674 911.757)" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#0071ff"/><stop offset="1" stop-color="#00bfe1"/></linearGradient><defs><linearGradient xlink:href="#a" id="b" x1=".148" x2=".845" y1=".851" y2=".154" gradientTransform="matrix(26.00048 0 0 25.99935 66.993 897.485)" gradientUnits="userSpaceOnUse"/></defs><path fill="url(#b)" d="m89.318 903.552-2.135 2.122c-.376.337-.558.879-.347 1.337 1.422 2.976.882 6.524-1.452 8.856-2.335 2.331-5.887 2.87-8.866 1.449-.439-.197-.954-.03-1.292.312l-2.17 2.167a1.154 1.154 0 0 0 .208 1.81 13.005 13.005 0 0 0 15.91-1.912 12.97 12.97 0 0 0 1.956-15.887 1.154 1.154 0 0 0-1.812-.254zm-18.467-2.305a12.969 12.969 0 0 0-2.02 15.885 1.154 1.154 0 0 0 1.812.254l2.124-2.11c.385-.336.572-.884.359-1.348-1.423-2.976-.884-6.524 1.451-8.856 2.334-2.332 5.887-2.871 8.866-1.45.434.194.942.033 1.281-.3l2.182-2.18a1.152 1.152 0 0 0-.208-1.81 13.009 13.009 0 0 0-15.893 1.973z"/></svg>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">SAKURA-Remote app icon</title>
+  <desc id="desc">A white five-petal cherry blossom with a yellow center and a subtle remote connection arm on a sakura-pink rounded square.</desc>
+  <defs>
+    <g id="petal">
+      <path d="M440 430
+               C370 375 320 280 368 220
+               C395 185 425 190 440 225
+               C455 190 485 185 512 220
+               C560 280 510 375 440 430Z"/>
+    </g>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="218" fill="#F8B4C8"/>
+  <rect x="48" y="48" width="928" height="928" rx="202" fill="none" stroke="#FFFFFF" stroke-opacity="0.28" stroke-width="8"/>
+  <g fill="#FFFFFF">
+    <use href="#petal"/>
+    <use href="#petal" transform="rotate(72 440 430)"/>
+    <use href="#petal" transform="rotate(144 440 430)"/>
+    <use href="#petal" transform="rotate(216 440 430)"/>
+    <use href="#petal" transform="rotate(288 440 430)"/>
+  </g>
+  <path d="M504 494 C590 570 670 655 758 748" fill="none" stroke="#FFFFFF" stroke-width="64" stroke-linecap="round"/>
+  <circle cx="763" cy="753" r="58" fill="#FFFFFF"/>
+  <circle cx="763" cy="753" r="20" fill="#F8B4C8"/>
+  <circle cx="440" cy="430" r="80" fill="#FFD84D" stroke="#FFFFFF" stroke-width="18"/>
+  <circle cx="440" cy="430" r="25" fill="#F4A8BF"/>
+</svg>
