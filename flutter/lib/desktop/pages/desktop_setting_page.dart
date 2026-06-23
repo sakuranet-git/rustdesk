@@ -2379,7 +2379,7 @@ class _AboutState extends State<_About> {
                         .marginSymmetric(vertical: 4.0)),
               InkWell(
                   onTap: () {
-                    launchUrlString('https://rustdesk.com/privacy.html');
+                    launchUrlString('https://sakuranet-co.jp/privacy.html');
                   },
                   child: Text(
                     translate('Privacy Statement'),
@@ -2387,7 +2387,7 @@ class _AboutState extends State<_About> {
                   ).marginSymmetric(vertical: 4.0)),
               InkWell(
                   onTap: () {
-                    launchUrlString('https://rustdesk.com');
+                    launchUrlString('https://sakuranet-co.jp/remote.html');
                   },
                   child: Text(
                     translate('Website'),

@@ -562,6 +562,12 @@ pub fn set_share_rdp(_enable: bool) {
 
 #[inline]
 pub fn is_installed_lower_version() -> bool {
+    // SAKURA-Remote: カスタムクライアントは独自の自動アップデート機構(updater.ps1)と
+    // アプリ内「アップデートを確認」ボタンを持つため、RustDesk内蔵の旧バージョン判定
+    // (Innoインストーラが BuildDate を書かず常にtrueになる)を無効化する。
+    if crate::common::is_custom_client() {
+        return false;
+    }
     #[cfg(not(windows))]
     return false;
     #[cfg(windows)]
