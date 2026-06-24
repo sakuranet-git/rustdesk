@@ -2367,6 +2367,18 @@ class _AboutState extends State<_About> {
               const SizedBox(
                 height: 8.0,
               ),
+              FutureBuilder<String>(
+                future: getSakuraProductVersion(),
+                builder: (context, snapshot) {
+                  final pv = snapshot.data ?? '';
+                  if (pv.isEmpty) return const SizedBox.shrink();
+                  return SelectionArea(
+                      child: Text('さくらリモート バージョン: $pv',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600))
+                          .marginSymmetric(vertical: 4.0));
+                },
+              ),
               SelectionArea(
                   child: Text('${translate('Version')}: $version')
                       .marginSymmetric(vertical: 4.0)),
@@ -2423,6 +2435,23 @@ class _AboutState extends State<_About> {
 }
 
 //#endregion
+
+// さくらリモートの製品バージョン(HKLM\SOFTWARE\SAKURA-Remote\ProductVersion)を読む
+Future<String> getSakuraProductVersion() async {
+  if (!Platform.isWindows) return '';
+  try {
+    final result = await Process.run('reg', [
+      'query',
+      r'HKLM\SOFTWARE\SAKURA-Remote',
+      '/v',
+      'ProductVersion',
+    ]);
+    final m = RegExp(r'ProductVersion\s+REG_SZ\s+([0-9.]+)')
+        .firstMatch(result.stdout.toString());
+    if (m != null) return m.group(1)!;
+  } catch (_) {}
+  return '';
+}
 
 //#region components
 
