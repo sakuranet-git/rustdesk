@@ -18,6 +18,10 @@ env:
   VERSION: "1.4.6"
   UPLOAD_ARTIFACT: "true"
   SIGN_BASE_URL: "-2"
+  # 自社サーバー/Keyをビルドに焼き込む（toml適用に依存せず必ず反映させる）
+  RENDEZVOUS_SERVER: "116.58.164.244"
+  RS_PUB_KEY: "CiBjNf1UarFy7pU5OhHoAVQUG0wvvOLriqycc4PMPd8="
+  API_SERVER: ""
 
 jobs:
   generate-bridge:
