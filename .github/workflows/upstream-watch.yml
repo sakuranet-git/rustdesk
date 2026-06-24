@@ -1,0 +1,83 @@
+name: Upstream Watch (RustDesk新版検知)
+
+# RustDesk本体(rustdesk/rustdesk)の新リリースを毎日チェックし、
+# 自社が取り込み済みの版(.sakura-upstream)より新しければ Issue で通知する。
+# ※ここでは検知と通知のみ。マージ/ビルドは人間がローカルで scripts/upstream-merge.ps1 を実行する。
+#   (クロスrepo pushや本流改変はしないため、デフォルト GITHUB_TOKEN のみで動作・追加トークン不要)
+
+on:
+  schedule:
+    - cron: "0 0 * * *"   # 毎日 09:00 JST (00:00 UTC)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (sakura-remote)
+        uses: actions/checkout@v4
+
+      - name: 検知と通知
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          CURRENT="$(tr -d ' \r\n' < .sakura-upstream)"
+          echo "取り込み済み(自社): $CURRENT"
+
+          # 公式の最新リリース(prerelease/draftは除外される)
+          LATEST="$(gh api repos/rustdesk/rustdesk/releases/latest --jq .tag_name)"
+          echo "RustDesk最新: $LATEST"
+
+          if [ -z "$LATEST" ]; then
+            echo "最新タグ取得失敗"; exit 1
+          fi
+
+          # 同一なら何もしない
+          if [ "$LATEST" = "$CURRENT" ]; then
+            echo "最新済み。通知不要。"; exit 0
+          fi
+
+          # バージョン比較: LATEST が CURRENT より新しい場合のみ通知
+          NEWER="$(printf '%s\n%s\n' "$CURRENT" "$LATEST" | sort -V | tail -1)"
+          if [ "$NEWER" != "$LATEST" ]; then
+            echo "最新が自社版以下($LATEST <= $CURRENT)。通知不要。"; exit 0
+          fi
+
+          TITLE="[upstream] RustDesk $LATEST が公開されました (現: $CURRENT)"
+
+          # 同一tagの既存openissue重複防止
+          EXIST="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label upstream-tracking --search "$LATEST in:title" --json number --jq 'length')"
+          if [ "$EXIST" != "0" ]; then
+            echo "既に通知Issueあり。重複作成しない。"; exit 0
+          fi
+
+          # ラベル用意(なければ作成)
+          gh label create upstream-tracking --repo "$GITHUB_REPOSITORY" --color FBCA04 --description "RustDesk上流追随" 2>/dev/null || true
+
+          BODY=$(cat <<EOF
+          RustDesk本体の新版 **$LATEST** が公開されました(自社取り込み済み: $CURRENT)。
+
+          ## 取り込み手順(ローカル・トークン不要)
+          1. \`pwsh scripts/upstream-merge.ps1 -UpstreamTag $LATEST\`
+             - hbb_common(tagが指すSHA)+本体を upstream-merge/$LATEST にマージ
+             - 自社rendezvous/鍵を再適用し、検証ゲート(Layer1/2/3)PASS後に push & CIビルド起動
+             - 競合/検証NG時は自動停止(人間が解決)
+          2. CIビルド完了後: \`pwsh scripts/release-from-ci.ps1 -RunId <id> -UpstreamVersion $LATEST\`
+             - Setup.exe生成・version.json更新・配信手順出力(アップロードは手動)
+          3. 問題なければ upstream-merge/$LATEST を sakura-remote へマージし、\`.sakura-upstream\` を $LATEST に更新
+
+          ※自動検知のみ。マージ/ビルド/配信は人間が実行する運用です。
+          EOF
+          )
+
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "$TITLE" \
+            --label upstream-tracking \
+            --body "$BODY"
+          echo "通知Issueを作成しました: $TITLE"
