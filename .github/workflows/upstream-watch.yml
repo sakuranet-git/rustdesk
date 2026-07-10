@@ -42,24 +42,26 @@ jobs:
 
           gh label create upstream-tracking --repo "$GITHUB_REPOSITORY" --color FBCA04 --description "RustDesk上流追随" 2>/dev/null || true
 
-          # tracking Issue(同一tagは重複作成しない)
-          EXIST="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label upstream-tracking --search "$LATEST in:title" --json number --jq 'length')"
-          if [ "$EXIST" = "0" ]; then
-            gh issue create --repo "$GITHUB_REPOSITORY" \
-              --title "[upstream] RustDesk $LATEST 検知 (現: $CURRENT) → 自動取り込み起動" \
-              --label upstream-tracking \
-              --body "RustDesk $LATEST を検知。upstream-merge.yml を自動起動します(マージ→ビルド→検証)。完了後 [READY] Issue が立ちます。"
-          else
-            echo "既に tracking Issue あり。"
+          # 同一tagの tracking Issue が既にあれば「処理中/承認待ち」とみなし、再検知しても再dispatchしない
+          # (毎日cronで同じ新版を再取り込みして重複ブランチ/ビルドが乱立するのを防ぐ・Codex指摘)
+          EXIST="$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --label upstream-tracking --search "$LATEST in:title" --json number --jq 'length')"
+          if [ "$EXIST" != "0" ]; then
+            echo "既に $LATEST の tracking Issue あり(処理中/承認待ち/対応済)。再dispatchしない。"
+            exit 0
           fi
 
-          # upstream-merge.yml を自動 dispatch(=完全自動化の要)
+          # 初回検知のみ: tracking Issue 作成 → upstream-merge 自動起動
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "[upstream] RustDesk $LATEST 検知 (現: $CURRENT) → 自動取り込み起動" \
+            --label upstream-tracking \
+            --body "RustDesk $LATEST を検知。upstream-merge.yml を自動起動します(マージ→ビルド→検証)。完了後 [READY] Issue が立ちます。取り込み後はこの Issue を close してください(次版検知の妨げにならないよう)。"
+
           if gh workflow run "upstream-merge.yml" --repo "$GITHUB_REPOSITORY" --ref sakura-remote -f upstream_tag="$LATEST"; then
             echo "upstream-merge を起動しました: $LATEST"
           else
             echo "::warning::upstream-merge の起動に失敗"
-            gh issue comment "$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label upstream-tracking --search "$LATEST in:title" --json number --jq '.[0].number')" \
-              --repo "$GITHUB_REPOSITORY" \
+            NUM="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label upstream-tracking --search "$LATEST in:title" --json number --jq '.[0].number')"
+            gh issue comment "$NUM" --repo "$GITHUB_REPOSITORY" \
               --body "自動起動(upstream-merge dispatch)に失敗しました。手動で Actions から upstream-merge.yml を tag=$LATEST で実行してください。" || true
             exit 1
           fi

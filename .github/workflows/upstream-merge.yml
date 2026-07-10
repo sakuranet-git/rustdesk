@@ -136,6 +136,8 @@ jobs:
           git add libs/hbb_common
           git commit --no-edit -m "chore: upstream ${TAG} マージ + hbb_common(${NEW_HBB}) 反映" || true
           git push origin "${BRANCH}" --force-with-lease
+          # race-safe な run特定用に branch head SHA を記録
+          echo "HEAD_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: ソース検証ゲート (Layer1/2)
         shell: pwsh
@@ -150,8 +152,15 @@ jobs:
         run: |
           set -euo pipefail
           gh workflow run "SAKURA Windows x64 (fast)" --repo "$FORK" --ref "${BRANCH}"
-          sleep 15
-          RID=$(gh run list --repo "$FORK" --workflow "sakura-win.yml" --branch "${BRANCH}" --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId')
+          # race-safe: branch head SHA と一致する run を待って特定する(並列/直前runの取り違え防止・Codex指摘)
+          RID=""
+          for i in $(seq 1 20); do
+            sleep 10
+            RID=$(gh run list --repo "$FORK" --workflow "sakura-win.yml" --branch "${BRANCH}" --event workflow_dispatch \
+                    --json databaseId,headSha,createdAt --jq "[.[] | select(.headSha==\"${HEAD_SHA}\")] | sort_by(.createdAt) | last | .databaseId // empty")
+            [ -n "$RID" ] && break
+          done
+          if [ -z "$RID" ]; then echo "::error::ビルドrunを特定できません(headSha=${HEAD_SHA})"; exit 1; fi
           echo "run_id=$RID" >> "$GITHUB_OUTPUT"
           echo "ビルド run: ${GITHUB_SERVER_URL}/${FORK}/actions/runs/$RID"
           # 完了待ち。post-build gate(焼き込み検証)が落ちればここも非0で失敗する。

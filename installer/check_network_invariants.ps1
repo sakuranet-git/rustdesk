@@ -55,34 +55,39 @@ $guardFns = @(
     @{ file = "src/updater.rs"; fn = "fn start_auto_update" },
     @{ file = "src/updater.rs"; fn = "fn check_update" },
     @{ file = "src/updater.rs"; fn = "fn stop_auto_update" },
-    @{ file = "src/common.rs";  fn = "fn manually_check_update" },
+    @{ file = "src/updater.rs"; fn = "fn manually_check_update" },
     @{ file = "src/common.rs";  fn = "fn check_software_update" },
     @{ file = "src/common.rs";  fn = "fn do_check_software_update" }
 )
 $guardPat = "is_custom_client"
-$guardChecked = 0
+$guardOk = 0
 foreach ($g in $guardFns) {
     $fp = Join-Path $SourceDir $g.file
-    if (-not (Test-Path $fp)) { continue }
+    if (-not (Test-Path $fp)) {
+        $violations.Add("$($g.file) が無い($($g.fn) を検査できない・上流でファイル改名/削除の疑い)")
+        continue
+    }
     $lines = Get-Content $fp
+    $found = $false
     for ($i = 0; $i -lt $lines.Count; $i++) {
         if ($lines[$i] -match [regex]::Escape($g.fn)) {
-            $guardChecked++
+            $found = $true
             # 探索範囲を広げる(空行/コメント増加での誤判定防止・Codex指摘: 40行)
             $window = ($lines[$i..([Math]::Min($i + 40, $lines.Count - 1))]) -join "`n"
             if ($window -notmatch $guardPat) {
                 $violations.Add("$($g.file): $($g.fn) に $guardPat guard が無い(公式updater経路が開いている可能性)")
-            }
+            } else { $guardOk++ }
             break
         }
     }
+    # 各関数ごとに未検出=fail(Codex指摘: 上流の改名/削除で1つでも欠けたら危険)
+    if (-not $found) {
+        $violations.Add("$($g.file): $($g.fn) が見つからない(上流改名/削除の疑い・要人間確認)")
+    }
 }
 $checks++
-# guard対象関数が1つも見つからない=上流が改名/削除した可能性。事故防止の中核なのでfail寄り(Codex指摘)。
-if ($guardChecked -eq 0) {
-    $violations.Add("updater guard対象関数が1つも見つからない(上流改名/削除の疑い)。要人間確認")
-} elseif (($violations | Where-Object { $_ -match 'guard' }).Count -eq 0) {
-    Write-Host "  OK: $guardChecked 関数すべてに guard あり" -ForegroundColor Green
+if (($violations | Where-Object { $_ -match 'guard|見つからない|検査できない' }).Count -eq 0) {
+    Write-Host "  OK: 全 $($guardFns.Count) 関数に guard あり" -ForegroundColor Green
 }
 
 # ---------- Layer 3: ビルド成果物 librustdesk.dll ----------
@@ -107,17 +112,19 @@ if ($ArtifactDir -ne "") {
 # 剥がれてもサーバー/鍵喪失ほど致命でないので、ここは fatal にせず警告に留める。
 if ($ArtifactDir -ne "") {
     Write-Host "■ Layer4: APP_NAME / ORG ブランディング (警告のみ)" -ForegroundColor Cyan
-    $found = $false
+    # 成果物の全対象を Latin1/UTF-16 で結合して APP_NAME/ORG を探す
+    $blob = ""
     foreach ($name in @("SAKURA-Remote.exe", "rustdesk.exe", "librustdesk.dll")) {
         $t = Join-Path $ArtifactDir $name
         if (-not (Test-Path $t)) { continue }
         $bytes = [System.IO.File]::ReadAllBytes($t)
-        $latin1 = [System.Text.Encoding]::GetEncoding(28591).GetString($bytes)
-        $utf16  = [System.Text.Encoding]::Unicode.GetString($bytes)
-        if ($latin1 -match [regex]::Escape($APP_NAME) -or $utf16 -match [regex]::Escape($APP_NAME)) { $found = $true; break }
+        $blob += [System.Text.Encoding]::GetEncoding(28591).GetString($bytes)
+        $blob += [System.Text.Encoding]::Unicode.GetString($bytes)
     }
-    if ($found) { Write-Host "  OK: APP_NAME '$APP_NAME' 検出" -ForegroundColor Green }
-    else { Write-Host "  警告: APP_NAME '$APP_NAME' を成果物内で検出できず(要目視・check_branding.ps1で別途確認)" -ForegroundColor Yellow }
+    foreach ($brand in @($APP_NAME, $ORG)) {
+        if ($blob -match [regex]::Escape($brand)) { Write-Host "  OK: '$brand' 検出" -ForegroundColor Green }
+        else { Write-Host "  警告: '$brand' を成果物内で検出できず(要目視・check_branding.ps1で別途確認)" -ForegroundColor Yellow }
+    }
 } else {
     Write-Host "■ Layer3/4: -ArtifactDir 未指定のためスキップ (ソースのみ検査)" -ForegroundColor DarkGray
 }
