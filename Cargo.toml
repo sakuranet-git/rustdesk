@@ -1,5 +1,5 @@
 [package]
-name = "SAKURA-Remote"
+name = "rustdesk"
 version = "1.4.9"
 authors = ["SAKURA-NET Co., Ltd. <git@sakura-mode.net>"]
 edition = "2021"
