@@ -312,9 +312,20 @@ class _DesktopHomePageState extends State<DesktopHomePage>
 
   Future<void> _launchManualUpdater() async {
     // updater.ps1 は Program Files への書込みが必要なため管理者権限で昇格起動する。
-    final psCommand = "Start-Process powershell -Verb RunAs -ArgumentList "
-        "'-NoProfile','-ExecutionPolicy','Bypass','-File','$_kUpdaterPath','-Manual'";
-    await Process.start('powershell', ['-NoProfile', '-Command', psCommand]);
+    const psExe = r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe';
+    final updaterPath = _kUpdaterPath.replaceAll("'", "''");
+    // Start-Process joins argument-list items with spaces. Quote the updater
+    // path inside the elevated PowerShell arguments so "Program Files" is not
+    // split into "C:\Program".
+    final psCommand = "Start-Process -FilePath '$psExe' -Verb RunAs "
+        "-ArgumentList '-NoProfile -ExecutionPolicy Bypass -File `\"$updaterPath`\" -Manual'";
+    await Process.start(psExe, [
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-Command',
+      psCommand
+    ]);
   }
 
   buildIDBoard(BuildContext context) {
