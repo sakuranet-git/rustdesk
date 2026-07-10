@@ -7,6 +7,7 @@ name: SAKURA Windows x64 (fast)
 
 on:
   workflow_dispatch:
+  workflow_call:
 
 env:
   SCITER_RUST_VERSION: "1.75"
@@ -171,6 +172,14 @@ jobs:
         with:
           name: topmostwindow-artifacts
           path: "./rustdesk"
+
+      - name: 接続不変条件ゲート (post-build)
+        shell: pwsh
+        run: |
+          # 焼き込み(サーバー/鍵)・updater guard・ブランディングを成果物で検査。
+          # 違反があれば upload せずにビルドを失敗させる(手動起動含む全ビルドを保護)。
+          & ./installer/check_network_invariants.ps1 -SourceDir . -ArtifactDir ./rustdesk
+          if ($LASTEXITCODE -ne 0) { throw "接続不変条件ゲート違反: 認証/中継サーバー・鍵の焼き込みが失われています。配信不可。" }
 
       - name: Upload unsigned
         uses: actions/upload-artifact@master
