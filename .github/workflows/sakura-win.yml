@@ -170,7 +170,7 @@ jobs:
       - name: Download RustDeskTempTopMostWindow artifacts
         uses: actions/download-artifact@master
         with:
-          name: topmostwindow-artifacts
+          name: topmostwindow-artifacts-x64
           path: "./rustdesk"
 
       - name: 接続不変条件ゲート (post-build)
