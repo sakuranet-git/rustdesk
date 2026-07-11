@@ -202,7 +202,7 @@ jobs:
             -f upstream_tag="${TAG}" \
             -f build_run_id="${RID}" \
             -f source_branch="${BRANCH}" \
-            -f deploy=true
+            -f deploy=false
 
       - name: READY notification
         env:
@@ -219,7 +219,7 @@ jobs:
           - Windows build run: ${GITHUB_SERVER_URL}/${FORK}/actions/runs/${RID}
           - Release workflow repo: ${RELEASE_REPO}
 
-          If deploy=true is approved and FTP secrets are configured, users can update from the app button after EXE/JSON publication."
+          The release workflow generates the package artifact. The local Windows auto deploy task publishes it with the saved WinSCP session, then users can update from the app button after EXE/JSON publication."
           gh issue create --repo "$GITHUB_REPOSITORY" --title "[READY] RustDesk ${TAG} SAKURA promoted and release dispatched" --label upstream-merge-ok --body "$BODY"
 
       - name: Failure notification
