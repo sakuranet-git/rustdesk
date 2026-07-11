@@ -314,11 +314,12 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     // updater.ps1 は Program Files への書込みが必要なため管理者権限で昇格起動する。
     const psExe = r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe';
     final updaterPath = _kUpdaterPath.replaceAll("'", "''");
-    // Start-Process joins argument-list items with spaces. Quote the updater
-    // path inside the elevated PowerShell arguments so "Program Files" is not
-    // split into "C:\Program".
+    final quotedUpdaterPath = '"$updaterPath"';
+    // Start-Process joins argument-list items with spaces. The updater path
+    // must be passed as an argument that already contains double quotes, so
+    // powershell.exe receives: -File "C:\Program Files\...\updater.ps1".
     final psCommand = "Start-Process -FilePath '$psExe' -Verb RunAs "
-        "-ArgumentList '-NoProfile -ExecutionPolicy Bypass -File `\"$updaterPath`\" -Manual'";
+        "-ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','$quotedUpdaterPath','-Manual'";
     await Process.start(psExe, [
       '-NoProfile',
       '-ExecutionPolicy',
