@@ -1,0 +1,243 @@
+name: Upstream Merge and Release
+
+# RustDesk の新しい upstream tag を SAKURA-Remote に取り込み、
+# merge → build → verification → sakura-remote promote → release workflow dispatch まで無人で進める。
+#
+# 必須 secret: SAKURA_BOT_TOKEN
+#   sakuranet-git/rustdesk: contents write, actions write, issues write
+#   sakuranet-git/hbb_common: contents write
+#   sakuranet-git/SAKURA-Remote: contents write, actions write, issues write
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: "RustDesk upstream tag to merge (example: 1.4.10)"
+        required: true
+        type: string
+
+concurrency:
+  group: upstream-merge-${{ inputs.upstream_tag }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+  actions: write
+
+env:
+  TAG: ${{ inputs.upstream_tag }}
+  BRANCH: upstream-merge/${{ inputs.upstream_tag }}
+  FORK: sakuranet-git/rustdesk
+  HBB: sakuranet-git/hbb_common
+  RELEASE_REPO: sakuranet-git/SAKURA-Remote
+
+jobs:
+  merge-build-promote-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check bot token
+        env:
+          BOT: ${{ secrets.SAKURA_BOT_TOKEN }}
+        run: |
+          if [ -z "${BOT:-}" ]; then
+            echo "::error::SAKURA_BOT_TOKEN is required for cross-repo push/dispatch."
+            exit 1
+          fi
+
+      - name: Checkout sakura-remote with submodules
+        uses: actions/checkout@v4
+        with:
+          ref: sakura-remote
+          submodules: recursive
+          fetch-depth: 0
+          token: ${{ secrets.SAKURA_BOT_TOKEN }}
+
+      - name: Configure git remotes
+        env:
+          BOT: ${{ secrets.SAKURA_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "sakura-bot"
+          git config user.email "ai.sakuranet@gmail.com"
+          git remote set-url origin "https://x-access-token:${BOT}@github.com/${FORK}.git"
+          git remote add upstream "https://github.com/rustdesk/rustdesk.git" || true
+          git -C libs/hbb_common remote set-url origin "https://x-access-token:${BOT}@github.com/${HBB}.git"
+          git -C libs/hbb_common remote add upstream "https://github.com/rustdesk/hbb_common.git" || true
+
+      - name: Fetch upstream tag and hbb_common SHA
+        id: hbbsha
+        run: |
+          set -euo pipefail
+          git fetch upstream --tags --force --quiet
+          git fetch origin --quiet
+          if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "::error::Upstream tag not found: ${TAG}"
+            exit 1
+          fi
+          SHA=$(git ls-tree "${TAG}" libs/hbb_common | sed -n 's/^160000 commit \([0-9a-f]\{40\}\).*/\1/p')
+          if [ -z "$SHA" ]; then
+            echo "::error::Failed to resolve hbb_common SHA from ${TAG}"
+            exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "hbb_common SHA = $SHA"
+
+      - name: Merge hbb_common and reapply network invariants
+        id: hbbmerge
+        env:
+          SHA: ${{ steps.hbbsha.outputs.sha }}
+        run: |
+          set -euo pipefail
+          cd libs/hbb_common
+          git fetch origin --quiet
+          git checkout -B sakura-remote origin/sakura-remote
+          git fetch upstream "$SHA" --quiet || git fetch upstream --quiet
+          git checkout -B "${BRANCH}" sakura-remote
+          if ! git merge --no-ff --no-edit "$SHA"; then
+            { echo "files<<EOF"; git diff --name-only --diff-filter=U; echo "EOF"; } >> "$GITHUB_OUTPUT"
+            git merge --abort || true
+            echo "::error::hbb_common merge conflict"
+            exit 1
+          fi
+          python3 - <<'PY'
+          import re
+          p='src/config.rs'
+          s=open(p,encoding='utf-8').read()
+          s=re.sub(r'pub const RENDEZVOUS_SERVERS: &\[&str\] = &\[[^\]]*\];',
+                   'pub const RENDEZVOUS_SERVERS: &[&str] = &["116.58.164.244"];', s)
+          s=re.sub(r'pub const RS_PUB_KEY: &str = "[^"]*";',
+                   'pub const RS_PUB_KEY: &str = "CiBjNf1UarFy7pU5OhHoAVQUG0wvvOLriqycc4PMPd8=";', s)
+          open(p,'w',encoding='utf-8').write(s)
+          PY
+          if ! git diff --quiet; then
+            git add src/config.rs
+            git commit -m "fix: reapply SAKURA rendezvous/key after upstream merge"
+          fi
+          git push origin "${BRANCH}" --force-with-lease
+          echo "NEW_HBB=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Merge rustdesk parent and update submodule pointer
+        id: parentmerge
+        run: |
+          set -euo pipefail
+          git checkout -B "${BRANCH}" sakura-remote
+          if ! git merge --no-ff --no-edit "${TAG}"; then
+            OTHER=$(git diff --name-only --diff-filter=U | grep -v '^libs/hbb_common$' || true)
+            if [ -n "$OTHER" ]; then
+              { echo "files<<EOF"; echo "$OTHER"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+              git merge --abort || true
+              echo "::error::rustdesk merge conflict"
+              exit 1
+            fi
+          fi
+          git -C libs/hbb_common checkout "${BRANCH}"
+          git add libs/hbb_common
+          git commit --no-edit -m "chore: merge upstream ${TAG} and hbb_common ${NEW_HBB}" || true
+          git push origin "${BRANCH}" --force-with-lease
+          echo "HEAD_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Source verification gate
+        shell: pwsh
+        run: |
+          & ./installer/check_network_invariants.ps1 -SourceDir .
+          if ($LASTEXITCODE -ne 0) { throw "Source network invariant gate failed." }
+
+      - name: Run Windows build and wait for post-build gate
+        id: build
+        env:
+          GH_TOKEN: ${{ secrets.SAKURA_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh workflow run "SAKURA Windows x64 (fast)" --repo "$FORK" --ref "${BRANCH}"
+          RID=""
+          for i in $(seq 1 30); do
+            sleep 10
+            RID=$(gh run list --repo "$FORK" --workflow "sakura-win.yml" --branch "${BRANCH}" --event workflow_dispatch \
+                    --json databaseId,headSha,createdAt --jq "[.[] | select(.headSha==\"${HEAD_SHA}\")] | sort_by(.createdAt) | last | .databaseId // empty")
+            [ -n "$RID" ] && break
+          done
+          if [ -z "$RID" ]; then
+            echo "::error::Could not locate Windows build run for headSha=${HEAD_SHA}"
+            exit 1
+          fi
+          echo "run_id=$RID" >> "$GITHUB_OUTPUT"
+          echo "Windows build run: ${GITHUB_SERVER_URL}/${FORK}/actions/runs/$RID"
+          gh run watch "$RID" --repo "$FORK" --exit-status
+
+      - name: Promote verified branches to sakura-remote
+        env:
+          GH_TOKEN: ${{ secrets.SAKURA_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          git fetch origin "${BRANCH}:${BRANCH}" sakura-remote --quiet
+          git -C libs/hbb_common fetch origin "${BRANCH}:${BRANCH}" sakura-remote --quiet
+
+          cd libs/hbb_common
+          git checkout -B sakura-remote origin/sakura-remote
+          git merge --no-ff --no-edit "${BRANCH}"
+          git push origin sakura-remote
+          HBB_PROMOTED_SHA="$(git rev-parse HEAD)"
+          cd ../..
+
+          git checkout -B sakura-remote origin/sakura-remote
+          git merge --no-ff --no-edit "${BRANCH}"
+          echo "${TAG}" > .sakura-upstream
+          git add .sakura-upstream libs/hbb_common
+          git commit -m "chore: promote RustDesk ${TAG} to sakura-remote" || true
+          git push origin sakura-remote
+          echo "PROMOTED_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "HBB_PROMOTED_SHA=${HBB_PROMOTED_SHA}" >> "$GITHUB_ENV"
+
+      - name: Dispatch SAKURA-Remote release workflow
+        env:
+          GH_TOKEN: ${{ secrets.SAKURA_BOT_TOKEN }}
+          RID: ${{ steps.build.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          gh workflow run "promote-upstream-release.yml" \
+            --repo "${RELEASE_REPO}" \
+            --ref main \
+            -f upstream_tag="${TAG}" \
+            -f build_run_id="${RID}" \
+            -f source_branch="${BRANCH}" \
+            -f deploy=true
+
+      - name: READY notification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RID: ${{ steps.build.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          gh label create upstream-merge-ok --repo "$GITHUB_REPOSITORY" --color 0E8A16 --description "Upstream merge verified" 2>/dev/null || true
+          BODY="RustDesk ${TAG} was merged, built, verified, promoted to sakura-remote, and the SAKURA-Remote release workflow was dispatched.
+
+          - rustdesk branch: ${BRANCH}
+          - hbb_common promoted SHA: ${HBB_PROMOTED_SHA}
+          - rustdesk promoted SHA: ${PROMOTED_SHA}
+          - Windows build run: ${GITHUB_SERVER_URL}/${FORK}/actions/runs/${RID}
+          - Release workflow repo: ${RELEASE_REPO}
+
+          If deploy=true is approved and FTP secrets are configured, users can update from the app button after EXE/JSON publication."
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "[READY] RustDesk ${TAG} SAKURA promoted and release dispatched" --label upstream-merge-ok --body "$BODY"
+
+      - name: Failure notification
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          gh label create upstream-merge-failed --repo "$GITHUB_REPOSITORY" --color B60205 --description "Upstream merge failed" 2>/dev/null || true
+          BODY="RustDesk ${TAG} automation failed.
+
+          - branch: ${BRANCH}
+          - workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          - hbb conflicts: ${{ steps.hbbmerge.outputs.files }}
+          - parent conflicts: ${{ steps.parentmerge.outputs.files }}
+
+          Mainline and production are not fully updated unless all previous steps completed."
+          EXIST=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label upstream-merge-failed --search "${TAG} in:title" --json number --jq 'length')
+          if [ "$EXIST" = "0" ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "[FAILED] RustDesk ${TAG} automation failed" --label upstream-merge-failed --body "$BODY"
+          fi

@@ -17,7 +17,8 @@ osx = platform.platform().startswith(
 hbb_name = 'rustdesk' + ('.exe' if windows else '')
 exe_path = 'target/release/' + hbb_name
 if windows:
-    flutter_build_dir = 'build/windows/x64/runner/Release/'
+    win_arch = 'arm64' if platform.machine().lower() in ('arm64', 'aarch64') else 'x64'
+    flutter_build_dir = f'build/windows/{win_arch}/runner/Release/'
 elif osx:
     flutter_build_dir = 'build/macos/Build/Products/Release/'
 else:
@@ -172,7 +173,7 @@ def generate_build_script_for_docker():
             # flutter_rust_bridge
             dart pub global activate ffigen --version 5.0.1
             pushd /tmp && git clone https://github.com/SoLongAndThanksForAllThePizza/flutter_rust_bridge --depth=1 && popd
-            pushd /tmp/flutter_rust_bridge/frb_codegen && cargo install --path . && popd
+            pushd /tmp/flutter_rust_bridge/frb_codegen && cargo install --path . --locked && popd
             pushd flutter && flutter pub get && popd
             ~/.cargo/bin/flutter_rust_bridge_codegen --rust-input ./src/flutter_ffi.rs --dart-output ./flutter/lib/generated_bridge.dart
             # install vcpkg
@@ -299,7 +300,7 @@ Version: %s
 Architecture: %s
 Maintainer: rustdesk <info@rustdesk.com>
 Homepage: https://rustdesk.com
-Depends: libgtk-3-0, libxcb-randr0, libxdo3 | libxdo4, libxfixes3, libxcb-shape0, libxcb-xfixes0, libasound2, libsystemd0, curl, libva2, libva-drm2, libva-x11-2, libgstreamer-plugins-base1.0-0, libpam0g, gstreamer1.0-pipewire%s
+Depends: libgtk-3-0t64 | libgtk-3-0, libxcb-randr0, libxdo3 | libxdo4, libxfixes3, libxcb-shape0, libxcb-xfixes0, libasound2t64 | libasound2, libsystemd0, curl, libva2, libva-drm2, libva-x11-2, libgstreamer-plugins-base1.0-0, libpam0g, gstreamer1.0-pipewire%s
 Recommends: libayatana-appindicator3-1
 Description: A remote control software.
 
@@ -317,7 +318,7 @@ def ffi_bindgen_function_refactor():
 
 def build_flutter_deb(version, features):
     if not skip_cargo:
-        system2(f'cargo build --features {features} --lib --release')
+        system2(f'cargo build --locked --features {features} --lib --release')
         ffi_bindgen_function_refactor()
     os.chdir('flutter')
     system2('flutter build linux --release')
@@ -405,16 +406,21 @@ def build_flutter_dmg(version, features):
     if not skip_cargo:
         # set minimum osx build target, now is 10.14, which is the same as the flutter xcode project
         system2(
-            f'MACOSX_DEPLOYMENT_TARGET=10.14 cargo build --features {features} --release')
+            f'MACOSX_DEPLOYMENT_TARGET=10.14 cargo build --locked --features {features} --release')
     # copy dylib
     system2(
         "cp target/release/liblibrustdesk.dylib target/release/librustdesk.dylib")
     os.chdir('flutter')
-    system2('flutter build macos --release')
-    system2('cp -rf ../target/release/service ./build/macos/Build/Products/Release/SAKURA-Remote.app/Contents/MacOS/')
+    # cargo builds a single-arch dylib for the host; restrict Xcode to the same arch
+    # so the universal-by-default ARCHS_STANDARD doesn't try to link a missing slice.
+    # FLUTTER_XCODE_* env vars are forwarded to xcodebuild as build settings.
+    mac_arch = 'arm64' if platform.machine().lower() in ('arm64', 'aarch64') else 'x86_64'
+    system2(
+        f'FLUTTER_XCODE_ARCHS={mac_arch} FLUTTER_XCODE_ONLY_ACTIVE_ARCH=YES flutter build macos --release')
+    system2('cp -rf ../target/release/service ./build/macos/Build/Products/Release/RustDesk.app/Contents/MacOS/')
     '''
     system2(
-        "create-dmg --volname \"RustDesk Installer\" --window-pos 200 120 --window-size 800 400 --icon-size 100 --app-drop-link 600 185 --icon SAKURA-Remote.app 200 190 --hide-extension SAKURA-Remote.app rustdesk.dmg ./build/macos/Build/Products/Release/SAKURA-Remote.app")
+        "create-dmg --volname \"RustDesk Installer\" --window-pos 200 120 --window-size 800 400 --icon-size 100 --app-drop-link 600 185 --icon RustDesk.app 200 190 --hide-extension RustDesk.app rustdesk.dmg ./build/macos/Build/Products/Release/RustDesk.app")
     os.rename("rustdesk.dmg", f"../rustdesk-{version}.dmg")
     '''
     os.chdir("..")
@@ -422,7 +428,7 @@ def build_flutter_dmg(version, features):
 
 def build_flutter_arch_manjaro(version, features):
     if not skip_cargo:
-        system2(f'cargo build --features {features} --lib --release')
+        system2(f'cargo build --locked --features {features} --lib --release')
     ffi_bindgen_function_refactor()
     os.chdir('flutter')
     system2('flutter build linux --release')
@@ -433,7 +439,7 @@ def build_flutter_arch_manjaro(version, features):
 
 def build_flutter_windows(version, features, skip_portable_pack):
     if not skip_cargo:
-        system2(f'cargo build --features {features} --lib --release')
+        system2(f'cargo build --locked --features {features} --lib --release')
         if not os.path.exists("target/release/librustdesk.dll"):
             print("cargo build failed, please check rust source code.")
             exit(-1)
@@ -489,13 +495,13 @@ def main():
     if windows:
         # build virtual display dynamic library
         os.chdir('libs/virtual_display/dylib')
-        system2('cargo build --release')
+        system2('cargo build --locked --release')
         os.chdir('../../..')
 
         if flutter:
             build_flutter_windows(version, features, args.skip_portable_pack)
             return
-        system2('cargo build --release --features ' + features)
+        system2('cargo build --locked --release --features ' + features)
         # system2('upx.exe target/release/rustdesk.exe')
         system2('mv target/release/rustdesk.exe target/release/RustDesk.exe')
         pa = os.environ.get('P')
@@ -506,20 +512,21 @@ def main():
                 'target\\release\\rustdesk.exe')
         else:
             print('Not signed')
+        os.makedirs(res_dir, exist_ok=True)
         system2(
             f'cp -rf target/release/RustDesk.exe {res_dir}')
         os.chdir('libs/portable')
         system2('pip3 install -r requirements.txt')
         system2(
             f'python3 ./generate.py -f ../../{res_dir} -o . -e ../../{res_dir}/rustdesk-{version}-win7-install.exe')
-        system2('mv ../../{res_dir}/rustdesk-{version}-win7-install.exe ../..')
+        system2(f'mv ../../{res_dir}/rustdesk-{version}-win7-install.exe ../..')
     elif os.path.isfile('/usr/bin/pacman'):
         # pacman -S -needed base-devel
         system2("sed -i 's/pkgver=.*/pkgver=%s/g' res/PKGBUILD" % version)
         if flutter:
             build_flutter_arch_manjaro(version, features)
         else:
-            system2('cargo build --release --features ' + features)
+            system2('cargo build --locked --release --features ' + features)
             system2('git checkout src/ui/common.tis')
             system2('strip target/release/rustdesk')
             system2('ln -s res/pacman_install && ln -s res/PKGBUILD')
@@ -528,7 +535,7 @@ def main():
             version, version))
         # pacman -U ./rustdesk.pkg.tar.zst
     elif os.path.isfile('/usr/bin/yum'):
-        system2('cargo build --release --features ' + features)
+        system2('cargo build --locked --release --features ' + features)
         system2('strip target/release/rustdesk')
         system2(
             "sed -i 's/Version:    .*/Version:    %s/g' res/rpm.spec" % version)
@@ -538,7 +545,7 @@ def main():
                 version, version))
         # yum localinstall rustdesk.rpm
     elif os.path.isfile('/usr/bin/zypper'):
-        system2('cargo build --release --features ' + features)
+        system2('cargo build --locked --release --features ' + features)
         system2('strip target/release/rustdesk')
         system2(
             "sed -i 's/Version:    .*/Version:    %s/g' res/rpm-suse.spec" % version)
@@ -557,12 +564,12 @@ def main():
                 #     'mv target/release/bundle/deb/rustdesk*.deb ./flutter/rustdesk.deb')
                 build_flutter_deb(version, features)
         else:
-            system2('cargo bundle --release --features ' + features)
+            system2('cargo --locked bundle --release --features ' + features)
             if osx:
                 system2(
-                    'strip target/release/bundle/osx/SAKURA-Remote.app/Contents/MacOS/rustdesk')
+                    'strip target/release/bundle/osx/RustDesk.app/Contents/MacOS/rustdesk')
                 system2(
-                    'cp libsciter.dylib target/release/bundle/osx/SAKURA-Remote.app/Contents/MacOS/')
+                    'cp libsciter.dylib target/release/bundle/osx/RustDesk.app/Contents/MacOS/')
                 # https://github.com/sindresorhus/create-dmg
                 system2('/bin/rm -rf *.dmg')
                 pa = os.environ.get('P')
@@ -570,15 +577,15 @@ def main():
                     system2('''
     # buggy: rcodesign sign ... path/*, have to sign one by one
     # install rcodesign via cargo install apple-codesign
-    #rcodesign sign --p12-file ~/.p12/rustdesk-developer-id.p12 --p12-password-file ~/.p12/.cert-pass --code-signature-flags runtime ./target/release/bundle/osx/SAKURA-Remote.app/Contents/MacOS/rustdesk
-    #rcodesign sign --p12-file ~/.p12/rustdesk-developer-id.p12 --p12-password-file ~/.p12/.cert-pass --code-signature-flags runtime ./target/release/bundle/osx/SAKURA-Remote.app/Contents/MacOS/libsciter.dylib
-    #rcodesign sign --p12-file ~/.p12/rustdesk-developer-id.p12 --p12-password-file ~/.p12/.cert-pass --code-signature-flags runtime ./target/release/bundle/osx/SAKURA-Remote.app
+    #rcodesign sign --p12-file ~/.p12/rustdesk-developer-id.p12 --p12-password-file ~/.p12/.cert-pass --code-signature-flags runtime ./target/release/bundle/osx/RustDesk.app/Contents/MacOS/rustdesk
+    #rcodesign sign --p12-file ~/.p12/rustdesk-developer-id.p12 --p12-password-file ~/.p12/.cert-pass --code-signature-flags runtime ./target/release/bundle/osx/RustDesk.app/Contents/MacOS/libsciter.dylib
+    #rcodesign sign --p12-file ~/.p12/rustdesk-developer-id.p12 --p12-password-file ~/.p12/.cert-pass --code-signature-flags runtime ./target/release/bundle/osx/RustDesk.app
     # goto "Keychain Access" -> "My Certificates" for below id which starts with "Developer ID Application:"
-    codesign -s "Developer ID Application: {0}" --force --options runtime  ./target/release/bundle/osx/SAKURA-Remote.app/Contents/MacOS/*
-    codesign -s "Developer ID Application: {0}" --force --options runtime  ./target/release/bundle/osx/SAKURA-Remote.app
+    codesign -s "Developer ID Application: {0}" --force --options runtime  ./target/release/bundle/osx/RustDesk.app/Contents/MacOS/*
+    codesign -s "Developer ID Application: {0}" --force --options runtime  ./target/release/bundle/osx/RustDesk.app
     '''.format(pa))
                 system2(
-                    'create-dmg "RustDesk %s.dmg" "target/release/bundle/osx/SAKURA-Remote.app"' % version)
+                    'create-dmg "RustDesk %s.dmg" "target/release/bundle/osx/RustDesk.app"' % version)
                 os.rename('RustDesk %s.dmg' %
                           version, 'rustdesk-%s.dmg' % version)
                 if pa:
@@ -593,7 +600,7 @@ def main():
     # https://gregoryszorc.com/docs/apple-codesign/stable/apple_codesign_getting_started.html#apple-codesign-app-store-connect-api-key
     # p8 file is generated when you generate api key (can download only once)
     rcodesign notary-submit --api-key-path ../.p12/api-key.json  --staple rustdesk-{1}.dmg
-    # verify:  spctl -a -t exec -v /Applications/SAKURA-Remote.app
+    # verify:  spctl -a -t exec -v /Applications/RustDesk.app
     '''.format(pa, version))
                 else:
                     print('Not signed')
