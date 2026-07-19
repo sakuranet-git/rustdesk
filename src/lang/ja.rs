@@ -589,6 +589,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("live_update_available_msg", "新しいバージョンがあります。今すぐ更新しますか？更新中はアプリが再起動します。"),
         ("live_update_now", "今すぐ更新"),
         ("live_update_started", "更新を開始しました。まもなくアプリが再起動します。"),
+        ("live_update_published_at", "公開日時"),
+        ("live_update_changes", "更新内容"),
         ("outgoing_only_desk_tip", "カスタマイズされたエディションを使用しています。\n他のコンピューターに接続できますが、他のコンピューターからのリクエストは受信できません。"),
         ("preset_password_warning", "このエディションには、既定で固定パスワードが設定されています。このパスワードを知っているユーザーはあなたのデバイスを完全にコントロールできるため、そのような危険がある場合は直ちに さくらリモート をアンインストールして下さい！"),
         ("Security Alert", "セキュリティ警告"),

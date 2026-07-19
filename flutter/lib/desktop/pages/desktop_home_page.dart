@@ -240,7 +240,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       }
       final current = await _getInstalledProductVersion();
       if (_compareVersion(latest, current) > 0) {
-        final ok = await _confirmUpdateDialog(current, latest);
+        final ok = await _confirmUpdateDialog(current, latest, manifest);
         if (ok == true) {
           await _launchManualUpdater();
           showToast(translate('live_update_started'));
@@ -286,7 +286,17 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     return 0;
   }
 
-  Future<bool?> _confirmUpdateDialog(String current, String latest) {
+  Future<bool?> _confirmUpdateDialog(
+      String current, String latest, Map<String, dynamic> manifest) {
+    final publishedAt = (manifest['published_at'] ??
+            manifest['release_date'] ??
+            '')
+        .toString();
+    final summary = (manifest['release_summary'] ?? '').toString();
+    final notesRaw = manifest['release_notes'];
+    final notes = notesRaw is List
+        ? notesRaw.map((e) => e.toString()).where((e) => e.isNotEmpty).toList()
+        : <String>[];
     return gFFI.dialogManager.show<bool>((setState, close, context) {
       return CustomAlertDialog(
         title: Text(translate('live_update_available_title')),
@@ -297,6 +307,20 @@ class _DesktopHomePageState extends State<DesktopHomePage>
             Text(translate('live_update_available_msg')),
             const SizedBox(height: 8),
             Text('$current  →  $latest'),
+            if (publishedAt.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text('${translate('live_update_published_at')}: $publishedAt'),
+            ],
+            if (summary.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(summary),
+            ],
+            if (notes.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(translate('live_update_changes')),
+              const SizedBox(height: 4),
+              ...notes.map((note) => Text('・$note')),
+            ],
           ],
         ),
         actions: [
