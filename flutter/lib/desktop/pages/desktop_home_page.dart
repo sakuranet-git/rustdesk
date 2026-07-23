@@ -214,17 +214,31 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   Widget buildLiveUpdateButton(BuildContext context) {
     return Obx(() {
       final checking = _liveUpdateChecking.value;
-      return TextButton.icon(
+      final label =
+          translate(checking ? 'live_update_checking' : 'live_update_check');
+      final updateColor = Theme.of(context).brightness == Brightness.dark
+          ? const Color(0xFF8AB4F8)
+          : borderColor;
+      return OutlinedButton.icon(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: updateColor,
+          minimumSize: const Size(176, 36),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          side: BorderSide(color: updateColor),
+        ),
         onPressed: checking ? null : () => _checkLiveUpdate(context),
         icon: checking
-            ? const SizedBox(
+            ? SizedBox(
                 width: 14,
                 height: 14,
-                child: CircularProgressIndicator(strokeWidth: 2),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: updateColor,
+                ),
               )
             : const Icon(Icons.system_update_alt, size: 16),
         label: Text(
-          translate(checking ? 'live_update_checking' : 'live_update_check'),
+          label,
           style: const TextStyle(fontSize: 12),
         ),
       );
