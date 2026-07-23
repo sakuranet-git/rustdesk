@@ -94,7 +94,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         alignment: Alignment.center,
         child: loadLogo(),
       ),
-      if (isWindows && bind.isCustomClient())
+      if ((isWindows || isMacOS) && bind.isCustomClient())
         Align(
           alignment: Alignment.center,
           child: buildLiveUpdateButton(context),
@@ -197,12 +197,19 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   }
 
   // ===== SAKURA-Remote: アップデートを確認 =====
-  // version.json (https://sakuranet-co.jp/SAKURA-Remote-version.json) を取得し、
-  // レジストリの ProductVersion と比較。新しければ確認のうえ updater.ps1 -Manual を昇格起動する。
-  static const String _kVersionJsonUrl =
+  // OS別のversion.jsonを取得し、インストール済みProductVersionと比較する。
+  // 新しければ確認のうえ、各OSのupdaterを管理者権限で起動する。
+  static const String _kWindowsVersionJsonUrl =
       'https://sakuranet-co.jp/SAKURA-Remote-version.json';
-  static const String _kUpdaterPath =
+  static const String _kMacVersionJsonUrl =
+      'https://sakuranet-co.jp/SAKURA-Remote-mac-version.json';
+  static const String _kWindowsUpdaterPath =
       r'C:\Program Files\SAKURA-Remote\updater.ps1';
+  static const String _kMacUpdaterPath =
+      '/Library/Application Support/SAKURA-Remote/updater.sh';
+
+  String get _versionJsonUrl =>
+      isMacOS ? _kMacVersionJsonUrl : _kWindowsVersionJsonUrl;
 
   Widget buildLiveUpdateButton(BuildContext context) {
     return Obx(() {
@@ -228,17 +235,24 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     _liveUpdateChecking.value = true;
     try {
       final resp = await http
-          .get(Uri.parse(_kVersionJsonUrl))
+          .get(Uri.parse(_versionJsonUrl))
           .timeout(const Duration(seconds: 15));
       if (resp.statusCode != 200) {
         throw Exception('HTTP ${resp.statusCode}');
       }
       final manifest = jsonDecode(resp.body) as Map<String, dynamic>;
+      if (isMacOS &&
+          (manifest['platform'] != 'macos' || manifest['arch'] != 'arm64')) {
+        throw Exception('unsupported macOS manifest');
+      }
       final latest = (manifest['product_version'] ?? '').toString();
       if (latest.isEmpty) {
         throw Exception('product_version missing');
       }
       final current = await _getInstalledProductVersion();
+      if (current.isEmpty) {
+        throw Exception('installed ProductVersion unavailable');
+      }
       if (_compareVersion(latest, current) > 0) {
         final ok = await _confirmUpdateDialog(current, latest, manifest);
         if (ok == true) {
@@ -257,6 +271,9 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   }
 
   Future<String> _getInstalledProductVersion() async {
+    if (isMacOS) {
+      return _getInstalledMacProductVersion();
+    }
     try {
       final result = await Process.run('reg', [
         'query',
@@ -271,7 +288,38 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     } catch (e) {
       debugPrint('read ProductVersion failed: $e');
     }
-    return '0.0.0';
+    return '';
+  }
+
+  Future<String> _getInstalledMacProductVersion() async {
+    try {
+      final result = await Process.run('/usr/bin/defaults', [
+        'read',
+        '/Library/Preferences/jp.sakuranet.sakuraremote',
+        'ProductVersion',
+      ]);
+      if (result.exitCode == 0) {
+        final version = result.stdout.toString().trim();
+        if (RegExp(r'^\d+(\.\d+)+$').hasMatch(version)) return version;
+      }
+    } catch (e) {
+      debugPrint('read macOS ProductVersion defaults failed: $e');
+    }
+
+    try {
+      final result = await Process.run('/usr/sbin/pkgutil', [
+        '--pkg-info',
+        'jp.sakuranet.sakuraremote.pkg',
+      ]);
+      if (result.exitCode == 0) {
+        final match = RegExp(r'^version:\s*([0-9.]+)$', multiLine: true)
+            .firstMatch(result.stdout.toString());
+        if (match != null) return match.group(1)!;
+      }
+    } catch (e) {
+      debugPrint('read macOS ProductVersion receipt failed: $e');
+    }
+    return '';
   }
 
   int _compareVersion(String a, String b) {
@@ -335,9 +383,22 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   }
 
   Future<void> _launchManualUpdater() async {
+    if (isMacOS) {
+      // AppleScriptの標準管理者認証を表示し、root所有のupdaterを実行する。
+      final command = "/bin/bash '${_kMacUpdaterPath}' --manual";
+      final result = await Process.run('/usr/bin/osascript', [
+        '-e',
+        'do shell script "$command" with administrator privileges',
+      ]);
+      if (result.exitCode != 0) {
+        throw Exception('macOS updater launch failed: ${result.stderr}');
+      }
+      return;
+    }
+
     // updater.ps1 は Program Files への書込みが必要なため管理者権限で昇格起動する。
     const psExe = r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe';
-    final updaterPath = _kUpdaterPath.replaceAll("'", "''");
+    final updaterPath = _kWindowsUpdaterPath.replaceAll("'", "''");
     final quotedUpdaterPath = '"$updaterPath"';
     // Start-Process joins argument-list items with spaces. The updater path
     // must be passed as an argument that already contains double quotes, so
