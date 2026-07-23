@@ -49,6 +49,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   var watchIsProcessTrust = false;
   var watchIsInputMonitoring = false;
   var watchIsCanRecordAudio = false;
+  String? _lastMacPermissionState;
   Timer? _updateTimer;
   bool isCardClosed = false;
 
@@ -251,6 +252,10 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       final resp = await http
           .get(Uri.parse(_versionJsonUrl))
           .timeout(const Duration(seconds: 15));
+      if (isMacOS && resp.statusCode == 404) {
+        showToast(translate('live_update_not_published'));
+        return;
+      }
       if (resp.statusCode != 200) {
         throw Exception('HTTP ${resp.statusCode}');
       }
@@ -263,9 +268,22 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       if (latest.isEmpty) {
         throw Exception('product_version missing');
       }
+      if (isMacOS &&
+          manifest['team_id'].toString() == 'UNSIGNED-DEVELOPMENT') {
+        showToast(translate('live_update_development_only'));
+        return;
+      }
       final current = await _getInstalledProductVersion();
       if (current.isEmpty) {
         throw Exception('installed ProductVersion unavailable');
+      }
+      if (isMacOS) {
+        final teamIdentifier = await _getInstalledMacTeamIdentifier();
+        if (teamIdentifier.isEmpty ||
+            teamIdentifier == 'UNSIGNED-DEVELOPMENT') {
+          showToast(translate('live_update_signing_required'));
+          return;
+        }
       }
       if (_compareVersion(latest, current) > 0) {
         final ok = await _confirmUpdateDialog(current, latest, manifest);
@@ -332,6 +350,22 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       }
     } catch (e) {
       debugPrint('read macOS ProductVersion receipt failed: $e');
+    }
+    return '';
+  }
+
+  Future<String> _getInstalledMacTeamIdentifier() async {
+    try {
+      final result = await Process.run('/usr/bin/defaults', [
+        'read',
+        '/Library/Preferences/jp.sakuranet.sakuraremote',
+        'TeamIdentifier',
+      ]);
+      if (result.exitCode == 0) {
+        return result.stdout.toString().trim();
+      }
+    } catch (e) {
+      debugPrint('read macOS TeamIdentifier defaults failed: $e');
     }
     return '';
   }
@@ -950,6 +984,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         svcStopped.value = v;
         setState(() {});
       }
+      _refreshMacPermissionState();
       if (watchIsCanScreenRecording) {
         if (bind.mainIsCanScreenRecording(prompt: false)) {
           watchIsCanScreenRecording = false;
@@ -1101,6 +1136,20 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     WidgetsBinding.instance.addObserver(this);
   }
 
+  void _refreshMacPermissionState() {
+    if (!isMacOS) return;
+    final isOutgoingOnly = bind.isOutgoingOnly();
+    final state = [
+      isOutgoingOnly || bind.mainIsCanScreenRecording(prompt: false),
+      isOutgoingOnly || bind.mainIsProcessTrusted(prompt: false),
+      bind.mainIsCanInputMonitoring(prompt: false),
+    ].join(':');
+    if (_lastMacPermissionState != state) {
+      _lastMacPermissionState = state;
+      if (mounted) setState(() {});
+    }
+  }
+
   _updateWindowSize() {
     RenderObject? renderObject = _childKey.currentContext?.findRenderObject();
     if (renderObject == null) {
@@ -1129,6 +1178,10 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
       shouldBeBlocked(_block, canBeBlocked);
+      if (isMacOS) {
+        _lastMacPermissionState = null;
+        _refreshMacPermissionState();
+      }
     }
   }
 
