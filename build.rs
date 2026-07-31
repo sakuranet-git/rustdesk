@@ -22,17 +22,65 @@ fn build_mac() {
     println!("cargo:rerun-if-changed={}", file);
 }
 
-#[cfg(all(windows, feature = "inline"))]
+#[cfg(windows)]
+fn flutter_product_version() -> Option<(String, u64)> {
+    let pubspec = std::fs::read_to_string("flutter/pubspec.yaml").ok()?;
+    let version = pubspec
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("version:"))?
+        .trim()
+        .to_owned();
+    let mut version_parts = version.split('+');
+    let semantic = version_parts.next()?;
+    let build = version_parts.next().unwrap_or("0").parse::<u64>().ok()?;
+    let numbers = semantic
+        .split('.')
+        .map(str::parse::<u64>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    if numbers.len() != 3 || numbers.iter().any(|number| *number > u16::MAX as u64) {
+        return None;
+    }
+    if build > u16::MAX as u64 {
+        return None;
+    }
+    let packed =
+        (numbers[0] << 48) | (numbers[1] << 32) | (numbers[2] << 16) | build;
+    Some((version, packed))
+}
+
+#[cfg(windows)]
 fn build_manifest() {
     use std::io::Write;
-    if std::env::var("PROFILE").unwrap() == "release" {
+    let is_release = std::env::var("PROFILE").ok().as_deref() == Some("release");
+    let is_flutter = std::env::var_os("CARGO_FEATURE_FLUTTER").is_some();
+    let is_inline = std::env::var_os("CARGO_FEATURE_INLINE").is_some();
+    if is_release && (is_flutter || is_inline) {
         let mut res = winres::WindowsResource::new();
-        res.set_icon("res/icon.ico")
-            .set_language(winapi::um::winnt::MAKELANGID(
-                winapi::um::winnt::LANG_ENGLISH,
-                winapi::um::winnt::SUBLANG_ENGLISH_US,
-            ))
-            .set_manifest_file("res/manifest.xml");
+        res.set_language(winapi::um::winnt::MAKELANGID(
+            winapi::um::winnt::LANG_ENGLISH,
+            winapi::um::winnt::SUBLANG_ENGLISH_US,
+        ));
+        if is_flutter {
+            res.set("CompanyName", "SAKURA-NET Co., Ltd.")
+                .set("ProductName", "SAKURA-Remote")
+                .set("InternalName", "SAKURA-Remote-Core")
+                .set("OriginalFilename", "SAKURA-Remote-Core.dll")
+                .set(
+                    "FileDescription",
+                    "SAKURA-Remote Windows Core Library",
+                )
+                .set_version_info(winres::VersionInfo::FILETYPE, 0x2);
+            if let Some((version, packed)) = flutter_product_version() {
+                res.set("FileVersion", &version)
+                    .set("ProductVersion", &version)
+                    .set_version_info(winres::VersionInfo::FILEVERSION, packed)
+                    .set_version_info(winres::VersionInfo::PRODUCTVERSION, packed);
+            }
+        } else {
+            res.set_icon("res/icon.ico")
+                .set_manifest_file("res/manifest.xml");
+        }
         match res.compile() {
             Err(e) => {
                 write!(std::io::stderr(), "{}", e).unwrap();
@@ -80,7 +128,7 @@ fn install_android_deps() {
 fn main() {
     hbb_common::gen_version();
     install_android_deps();
-    #[cfg(all(windows, feature = "inline"))]
+    #[cfg(windows)]
     build_manifest();
     #[cfg(windows)]
     build_windows();
@@ -91,4 +139,5 @@ fn main() {
         println!("cargo:rustc-link-lib=framework=ApplicationServices");
     }
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=flutter/pubspec.yaml");
 }
