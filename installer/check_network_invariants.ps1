@@ -4,7 +4,7 @@
 # check_branding.ps1(表示名残骸検出/allowlist広め) とは役割を分離する。
 #
 # 使い方:
-#   pwsh installer/check_network_invariants.ps1 -SourceDir source [-ArtifactDir <librustdesk.dllのあるディレクトリ>]
+#   pwsh installer/check_network_invariants.ps1 -SourceDir source [-ArtifactDir <SAKURA-Remote-Core.dllのあるディレクトリ>]
 #   (-ArtifactDir 省略時は Layer1=ソースのみ検査)
 #
 # 終了コード: 0=全PASS / 1=不変条件違反 / 2=対象ファイル不在
@@ -90,21 +90,21 @@ if (($violations | Where-Object { $_ -match 'guard|見つからない|検査で�
     Write-Host "  OK: 全 $($guardFns.Count) 関数に guard あり" -ForegroundColor Green
 }
 
-# ---------- Layer 3: ビルド成果物 librustdesk.dll ----------
+# ---------- Layer 3: ビルド成果物 SAKURA-Remote-Core.dll ----------
 if ($ArtifactDir -ne "") {
-    $dll = Join-Path $ArtifactDir "librustdesk.dll"
-    Write-Host "■ Layer3: 成果物 librustdesk.dll" -ForegroundColor Cyan
+    $dll = Join-Path $ArtifactDir "SAKURA-Remote-Core.dll"
+    Write-Host "■ Layer3: 成果物 SAKURA-Remote-Core.dll" -ForegroundColor Cyan
     if (-not (Test-Path $dll)) {
         Write-Host "  ERROR: 見つかりません: $dll" -ForegroundColor Red
         exit 2
     }
     $bin = Read-AsLatin1 $dll
     $checks++
-    if ($bin -notmatch [regex]::Escape($GOOD_SERVER)) { $violations.Add("librustdesk.dll に 自社サーバー $GOOD_SERVER が焼き込まれていない") }
-    if ($bin -notmatch [regex]::Escape($GOOD_KEY))    { $violations.Add("librustdesk.dll に 自社鍵 が焼き込まれていない") }
-    if ($bin -match    [regex]::Escape($BAD_SERVER))  { $violations.Add("librustdesk.dll に 公式サーバー $BAD_SERVER が残存") }
-    if ($bin -match    [regex]::Escape($BAD_KEY))     { $violations.Add("librustdesk.dll に 公式鍵 が残存") }
-    if ($violations.Count -eq 0) { Write-Host "  OK: librustdesk.dll 焼き込み 満たす" -ForegroundColor Green }
+    if ($bin -notmatch [regex]::Escape($GOOD_SERVER)) { $violations.Add("SAKURA-Remote-Core.dll に 自社サーバー $GOOD_SERVER が焼き込まれていない") }
+    if ($bin -notmatch [regex]::Escape($GOOD_KEY))    { $violations.Add("SAKURA-Remote-Core.dll に 自社鍵 が焼き込まれていない") }
+    if ($bin -match    [regex]::Escape($BAD_SERVER))  { $violations.Add("SAKURA-Remote-Core.dll に 公式サーバー $BAD_SERVER が残存") }
+    if ($bin -match    [regex]::Escape($BAD_KEY))     { $violations.Add("SAKURA-Remote-Core.dll に 公式鍵 が残存") }
+    if ($violations.Count -eq 0) { Write-Host "  OK: SAKURA-Remote-Core.dll 焼き込み 満たす" -ForegroundColor Green }
 }
 
 # ---------- Layer 4: APP_NAME / ORG ブランディング (警告のみ・誤配信ブロックを避ける) ----------
@@ -114,7 +114,7 @@ if ($ArtifactDir -ne "") {
     Write-Host "■ Layer4: APP_NAME / ORG ブランディング (警告のみ)" -ForegroundColor Cyan
     # 成果物の全対象を Latin1/UTF-16 で結合して APP_NAME/ORG を探す
     $blob = ""
-    foreach ($name in @("SAKURA-Remote.exe", "rustdesk.exe", "librustdesk.dll")) {
+    foreach ($name in @("SAKURA-Remote.exe", "SAKURA-Remote-Core.dll")) {
         $t = Join-Path $ArtifactDir $name
         if (-not (Test-Path $t)) { continue }
         $bytes = [System.IO.File]::ReadAllBytes($t)
