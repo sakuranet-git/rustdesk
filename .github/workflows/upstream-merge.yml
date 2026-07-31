@@ -4,7 +4,7 @@ name: Upstream Merge and Release
 # merge → build → verification → sakura-remote promote → release workflow dispatch まで無人で進める。
 #
 # 必須 secret: SAKURA_BOT_TOKEN
-#   sakuranet-git/rustdesk: contents write, actions write, issues write
+#   sakuranet-git/SAKURA-NET-Remote: contents write, actions write, issues write
 #   sakuranet-git/hbb_common: contents write
 #   sakuranet-git/SAKURA-Remote: contents write, actions write, issues write
 
@@ -28,7 +28,7 @@ permissions:
 env:
   TAG: ${{ inputs.upstream_tag }}
   BRANCH: upstream-merge/${{ inputs.upstream_tag }}
-  FORK: sakuranet-git/rustdesk
+  FORK: sakuranet-git/SAKURA-NET-Remote
   HBB: sakuranet-git/hbb_common
   RELEASE_REPO: sakuranet-git/SAKURA-Remote
 
